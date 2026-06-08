@@ -23,20 +23,71 @@ struct SceneKitPanoramaView: UIViewRepresentable {
         
         let scene = SCNScene()
         let aspectRatio = Float(image.size.width / image.size.height)
-        let arcGeometry = createPanoramaArc(aspectRatio: aspectRatio)
         
+        //panorama
+        let arcGeometry = createPanoramaArc(aspectRatio: aspectRatio, radius: 10.0, padding: 0.0)
         let material = SCNMaterial()
         material.diffuse.contents = image
-        
         material.isDoubleSided = false
+        
+        material.transparent.contents = createCornerMask(aspectRatio: aspectRatio)
         arcGeometry.materials = [material]
         
         let arcNode = SCNNode(geometry: arcGeometry)
         arcNode.position = SCNVector3(0, 0, 0)
+        arcNode.renderingOrder = 1
         scene.rootNode.addChildNode(arcNode)
         
+        //shadow
+        let shadowGeometry = createPanoramaArc(aspectRatio: aspectRatio, radius: 10.2, padding: 2.5)
+        let shadowMaterial = SCNMaterial()
+        
+        shadowMaterial.diffuse.contents = createDropShadow(aspectRatio: aspectRatio)
+        shadowMaterial.isDoubleSided = false
+        shadowMaterial.writesToDepthBuffer = false
+        shadowGeometry.materials = [shadowMaterial]
+        
+        let shadowNode = SCNNode(geometry: shadowGeometry)
+        shadowNode.position = SCNVector3(0, 0, 0)
+        shadowNode.renderingOrder = 0
+        scene.rootNode.addChildNode(shadowNode)
+        
+        //background
+        let backgroundGeometry = createPanoramaArc(aspectRatio: aspectRatio, radius: 15.0, expandScale: 4)
+        let tinySize = CGSize(width: 200, height: 200 / CGFloat(aspectRatio))
+        let renderer = UIGraphicsImageRenderer(size: tinySize)
+        let tinyImage = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: tinySize))
+        }
+        
+        var blurryImage = tinyImage
+        if let ciImage = CIImage(image: tinyImage), let blurFilter = CIFilter(name: "CIGaussianBlur") {
+            blurFilter.setValue(ciImage, forKey: kCIInputImageKey)
+            blurFilter.setValue(15.0, forKey: kCIInputRadiusKey)
+            
+            let context = CIContext()
+            if let output = blurFilter.outputImage,
+               let cgImage = context.createCGImage(output, from: ciImage.extent) {
+                blurryImage = UIImage(cgImage: cgImage)
+            }
+        }
+        
+        let backgroundMaterial = SCNMaterial()
+        backgroundMaterial.diffuse.contents = blurryImage
+        backgroundMaterial.isDoubleSided = false
+        backgroundMaterial.writesToDepthBuffer = false
+        
+        backgroundMaterial.diffuse.intensity = 0.5
+        backgroundGeometry.materials = [backgroundMaterial]
+        
+        let backgroundNode = SCNNode(geometry: backgroundGeometry)
+        backgroundNode.position = SCNVector3(0, 0, 0)
+        backgroundNode.renderingOrder = -1
+        scene.rootNode.addChildNode(backgroundNode)
+        
+        //camera
         let camera = SCNCamera()
-        camera.fieldOfView = 65.0
+        camera.fieldOfView = 80.0
         
         let cameraNode = SCNNode()
         cameraNode.camera = camera
@@ -59,17 +110,21 @@ struct SceneKitPanoramaView: UIViewRepresentable {
     
     func updateUIView(_ uiView: SCNView, context: Context) {}
     
-    private func createPanoramaArc(aspectRatio: Float) -> SCNGeometry {
-        let radius: Float = 10.0
+    private func createPanoramaArc(aspectRatio: Float, radius: Float = 10.0, padding: Float = 0.0, expandScale: Float = 1.0) -> SCNGeometry {
         let verticalFOVRadians: Float = 65.0 * .pi / 180.0
         
-        let height = 2.0 * radius * tan(verticalFOVRadians / 2.0)
-        let arcLength = height * aspectRatio
-        let theta = arcLength / radius
+        let baseHeight = 2.0 * radius * tan(verticalFOVRadians / 2.0) * expandScale
+        let baseArcLength = baseHeight * aspectRatio
         
-        let segments = Int(max(50, theta * 20))
-        let angleStep = theta / Float(segments)
-        let startAngle = -theta / 2.0
+        let height = baseHeight + padding
+        let arcLength = baseArcLength + padding
+        
+        let theta = (arcLength / radius) * expandScale
+        let finalTheta = min(theta, Float.pi * 2.0)
+        
+        let segments = Int(max(50, finalTheta * 20))
+        let angleStep = finalTheta / Float(segments)
+        let startAngle = -finalTheta / 2.0
         
         var vertices: [SCNVector3] = []
         var uvs: [CGPoint] = []
@@ -102,8 +157,58 @@ struct SceneKitPanoramaView: UIViewRepresentable {
         let element = SCNGeometryElement(indices: indices, primitiveType: .triangles)
         
         let geometry = SCNGeometry(sources: [vertexSource, uvSource], elements: [element])
-        geometry.setValue(theta, forKey: "theta")
+        geometry.setValue(finalTheta, forKey: "theta")
         return geometry
+    }
+    
+    
+    //MARK: - Corners & Shadow
+    
+    private func createCornerMask(aspectRatio: Float) -> UIImage {
+        let width: CGFloat = 3072
+        let height = width / CGFloat(aspectRatio)
+        let size = CGSize(width: width, height: height)
+        
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { context in
+            UIColor.clear.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            
+            UIColor.white.setFill()
+            let path = UIBezierPath(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: width * 0.01)
+            path.fill()
+        }
+    }
+    
+    private func createDropShadow(aspectRatio: Float) -> UIImage {
+        let width: CGFloat = 512
+        let height = width / CGFloat(aspectRatio)
+        let size = CGSize(width: width, height: height)
+        
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let rawShadow = renderer.image { context in
+            UIColor.clear.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            
+            UIColor.black.setFill()
+            let rect = CGRect(origin: .zero, size: size)
+            let path = UIBezierPath(roundedRect: rect, cornerRadius: width * 0.02)
+            path.fill()
+        }
+        
+        guard let ciImage = CIImage(image: rawShadow),
+              let blurFilter = CIFilter(name: "CIGaussianBlur") else { return rawShadow }
+        
+        blurFilter.setValue(ciImage, forKey: kCIInputImageKey)
+        blurFilter.setValue(15.0, forKey: kCIInputRadiusKey)
+        
+        let context = CIContext()
+        if let output = blurFilter.outputImage,
+           let cgImage = context.createCGImage(output, from: output.extent) {
+            return UIImage(cgImage: cgImage)
+        }
+        
+        return rawShadow
     }
     
     
@@ -113,14 +218,14 @@ struct SceneKitPanoramaView: UIViewRepresentable {
         var cameraNode: SCNNode?
         var camera: SCNCamera?
         var horizontalAngle: Float = 0
-        private var initialFOV: CGFloat = 65.0
+        private var initialFOV: CGFloat = 80.0
         
         private var displayLink: CADisplayLink?
         private var yawVelocity: Float = 0
         private var pitchVelocity: Float = 0
         private var fovVelocity: CGFloat = 0
         private var currentViewSize: CGSize = .zero
-        private let sensitivityMultiplier: Float = 1.4
+        private let sensitivityMultiplier: Float = 1.5
         
         @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
             guard let node = cameraNode,

@@ -9,9 +9,20 @@ import Foundation
 import Combine
 import Photos
 
-class PanoramaFetcher: ObservableObject {
+class PanoramaFetcher: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
+    
     @Published var panoramas: [PHAsset] = []
     @Published var accessGranted: Bool = false
+    private var fetchResult: PHFetchResult<PHAsset>?
+    
+    override init() {
+        super.init()
+        PHPhotoLibrary.shared().register(self)
+    }
+    
+    deinit {
+        PHPhotoLibrary.shared().unregisterChangeObserver(self)
+    }
     
     func requestAccess() {
         PHPhotoLibrary.requestAuthorization(for: .readWrite) { [weak self] status in
@@ -32,13 +43,33 @@ class PanoramaFetcher: ObservableObject {
         fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         fetchOptions.predicate = NSPredicate(format: "(mediaSubtype & %d) != 0", PHAssetMediaSubtype.photoPanorama.rawValue)
         
-        let fetchResult = PHAsset.fetchAssets(with: .image, options: fetchOptions)
+        self.fetchResult = PHAsset.fetchAssets(with: .image, options: fetchOptions)
         var fetchedAssets: [PHAsset] = []
-        fetchResult.enumerateObjects { (asset, index, stop) in
+        self.fetchResult?.enumerateObjects { (asset, index, stop) in
             fetchedAssets.append(asset)
         }
         
-        self.panoramas = fetchedAssets
+        DispatchQueue.main.async {
+            self.panoramas = fetchedAssets
+        }
+    }
+    
+    func photoLibraryDidChange(_ changeInstance: PHChange) {
+        guard let currentFetchResult = self.fetchResult,
+              let changes = changeInstance.changeDetails(for: currentFetchResult) else { return }
+        
+        DispatchQueue.main.async {
+            self.fetchResult = changes.fetchResultAfterChanges
+            
+            if changes.hasIncrementalChanges || changes.hasMoves {
+                var updatedAssets: [PHAsset] = []
+                self.fetchResult?.enumerateObjects { (asset, _, _) in
+                    updatedAssets.append(asset)
+                }
+                
+                self.panoramas = updatedAssets
+            }
+        }
     }
 
 }

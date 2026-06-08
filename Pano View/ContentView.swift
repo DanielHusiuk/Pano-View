@@ -20,11 +20,13 @@ struct ContentView: View {
                         LazyVGrid(columns: columns, spacing: 16) {
                             ForEach(fetcher.panoramas, id: \.localIdentifier) { asset in
                                 NavigationLink(destination: PanoramaDetailView(asset: asset)) {
-                                    ThumbnailView(asset: asset)
-                                        .frame(maxWidth: .infinity)
-                                        .frame(height: 120)
-                                        .cornerRadius(12)
-                                        .clipped()
+                                    GeometryReader { geometry in
+                                        ThumbnailView(asset: asset)
+                                            .frame(width: geometry.size.width, height: 120)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    }
+                                    .frame(height: 120)
+                                    .shadow(color: .black.opacity(0.3), radius: 5)
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -63,13 +65,15 @@ struct ThumbnailView: View {
             if let uiImage = image {
                 Image(uiImage: uiImage)
                     .resizable()
-                    .aspectRatio(contentMode: .fill)
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 Rectangle()
                     .fill(Color.secondary.opacity(0.3))
                     .overlay(ProgressView())
             }
         }
+        .clipped()
         .onAppear {
             fetchImage()
         }
@@ -80,6 +84,7 @@ struct ThumbnailView: View {
         let options = PHImageRequestOptions()
         options.isNetworkAccessAllowed = true
         options.deliveryMode = .opportunistic
+        options.resizeMode = .fast
         
         let targetSize = CGSize(width: 500, height: 150)
         
