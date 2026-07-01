@@ -11,6 +11,7 @@ import Photos
 
 struct SceneKitPanoramaView: UIViewRepresentable {
     let image: UIImage
+    let size: CGSize
     
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -20,15 +21,18 @@ struct SceneKitPanoramaView: UIViewRepresentable {
         let sceneView = SCNView()
         sceneView.allowsCameraControl = false
         sceneView.backgroundColor = .black
+        sceneView.antialiasingMode = .none
         
         let scene = SCNScene()
         let aspectRatio = Float(image.size.width / image.size.height)
         
         //panorama
         let arcGeometry = createPanoramaArc(aspectRatio: aspectRatio, radius: 10.0, padding: 0.0)
+        let theta = arcGeometry.value(forKey: "theta") as? Float ?? .pi
         let material = SCNMaterial()
-        material.diffuse.contents = image
+        material.diffuse.contents = image.cgImage
         material.isDoubleSided = false
+        material.diffuse.mipFilter = .linear
         
         material.transparent.contents = createCornerMask(aspectRatio: aspectRatio)
         arcGeometry.materials = [material]
@@ -42,7 +46,7 @@ struct SceneKitPanoramaView: UIViewRepresentable {
         let shadowGeometry = createPanoramaArc(aspectRatio: aspectRatio, radius: 10.2, padding: 2.5)
         let shadowMaterial = SCNMaterial()
         
-        shadowMaterial.diffuse.contents = createDropShadow(aspectRatio: aspectRatio)
+        shadowMaterial.diffuse.contents = createDropShadow(aspectRatio: aspectRatio, theta: theta)
         shadowMaterial.isDoubleSided = false
         shadowMaterial.writesToDepthBuffer = false
         shadowGeometry.materials = [shadowMaterial]
@@ -53,7 +57,7 @@ struct SceneKitPanoramaView: UIViewRepresentable {
         scene.rootNode.addChildNode(shadowNode)
         
         //background
-        let backgroundGeometry = createPanoramaArc(aspectRatio: aspectRatio, radius: 15.0, expandScale: 4)
+        let backgroundGeometry = createPanoramaArc(aspectRatio: aspectRatio, radius: 15.0, expandScale: 6)
         let tinySize = CGSize(width: 200, height: 200 / CGFloat(aspectRatio))
         let renderer = UIGraphicsImageRenderer(size: tinySize)
         let tinyImage = renderer.image { _ in
@@ -99,6 +103,8 @@ struct SceneKitPanoramaView: UIViewRepresentable {
         context.coordinator.horizontalAngle = arcGeometry.value(forKey: "theta") as? Float ?? .pi
         
         let panGesture = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
+        panGesture.delegate = context.coordinator
+        
         let pinchGesture = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePinch(_:)))
         
         sceneView.addGestureRecognizer(panGesture)
@@ -108,7 +114,15 @@ struct SceneKitPanoramaView: UIViewRepresentable {
         return sceneView
     }
     
-    func updateUIView(_ uiView: SCNView, context: Context) {}
+    func updateUIView(_ uiView: SCNView, context: Context) {
+        let newSize = size
+        guard newSize.height > 0 else { return }
+        
+        if context.coordinator.currentViewSize != newSize {
+            context.coordinator.currentViewSize = newSize
+            context.coordinator.animateCameraBounds()
+        }
+    }
     
     private func createPanoramaArc(aspectRatio: Float, radius: Float = 10.0, padding: Float = 0.0, expandScale: Float = 1.0) -> SCNGeometry {
         let verticalFOVRadians: Float = 65.0 * .pi / 180.0
@@ -165,7 +179,7 @@ struct SceneKitPanoramaView: UIViewRepresentable {
     //MARK: - Corners & Shadow
     
     private func createCornerMask(aspectRatio: Float) -> UIImage {
-        let width: CGFloat = 3072
+        let width: CGFloat = 1024
         let height = width / CGFloat(aspectRatio)
         let size = CGSize(width: width, height: height)
         
@@ -180,19 +194,17 @@ struct SceneKitPanoramaView: UIViewRepresentable {
         }
     }
     
-    private func createDropShadow(aspectRatio: Float) -> UIImage {
-        let width: CGFloat = 512
-        let height = width / CGFloat(aspectRatio)
-        let size = CGSize(width: width, height: height)
-        
+    private func createDropShadow(aspectRatio: Float, theta: Float) -> UIImage {
+        let width: CGFloat = 1024
+        let size = CGSize(width: width, height: width * 0.5)
         let renderer = UIGraphicsImageRenderer(size: size)
+        
         let rawShadow = renderer.image { context in
-            UIColor.clear.setFill()
-            context.fill(CGRect(origin: .zero, size: size))
+            let shadowWidth = size.width * CGFloat(theta / (.pi * 2.0))
+            let rect = CGRect(x: (size.width - shadowWidth) / 2, y: size.height * 0.1, width: shadowWidth, height: size.height * 0.8)
             
-            UIColor.black.setFill()
-            let rect = CGRect(origin: .zero, size: size)
             let path = UIBezierPath(roundedRect: rect, cornerRadius: width * 0.02)
+            UIColor.black.setFill()
             path.fill()
         }
         
@@ -214,40 +226,75 @@ struct SceneKitPanoramaView: UIViewRepresentable {
     
     // MARK: - Gesture Coordinator
     
-    class Coordinator: NSObject {
+    class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var cameraNode: SCNNode?
         var camera: SCNCamera?
+        
         var horizontalAngle: Float = 0
         private var initialFOV: CGFloat = 80.0
-        
         private var displayLink: CADisplayLink?
+        
         private var yawVelocity: Float = 0
         private var pitchVelocity: Float = 0
         private var fovVelocity: CGFloat = 0
-        private var currentViewSize: CGSize = .zero
-        private let sensitivityMultiplier: Float = 1.5
+        var currentViewSize: CGSize = .zero
+        
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            if #available(iOS 26.0, *) {
+                return true
+            }
+            
+            guard let panGesture = gestureRecognizer as? UIPanGestureRecognizer else { return true }
+            let velocity = panGesture.velocity(in: panGesture.view)
+            let location = panGesture.location(in: panGesture.view)
+            
+            if location.x < 40 && velocity.x > 0 {
+                return false
+            }
+            return true
+        }
+        
+        private func getCameraPhysics() -> (maxYaw: Float, maxPitch: Float, yawSens: Float, pitchSens: Float) {
+            guard currentViewSize.height > 0, let camera = camera else { return (0, 0, 0, 0) }
+            
+            let aspect = Float(currentViewSize.width / currentViewSize.height)
+            let verticalFovRadians = Float(camera.fieldOfView) * .pi / 180.0
+            let horizontalFovRadians = 2.0 * atan(tan(verticalFovRadians / 2.0) * aspect)
+            let baseMarginPixels: Float = 50.0
+            
+            let radPerPixel = horizontalFovRadians / Float(currentViewSize.width)
+            let extraMarginRadians = baseMarginPixels * radPerPixel
+            let baseMaxYaw = (horizontalAngle / 2.0) - (horizontalFovRadians / 2.0)
+            let maxYaw = max(0, baseMaxYaw + extraMarginRadians)
+            let maxPitch: Float = 25.0 * .pi / 180.0
+            
+            let yawSens = horizontalFovRadians / Float(currentViewSize.width)
+            let pitchSens = verticalFovRadians / Float(currentViewSize.height)
+            return (maxYaw, maxPitch, yawSens, pitchSens)
+        }
+        
+        func animateCameraBounds() {
+            guard let node = cameraNode else { return }
+            let physics = getCameraPhysics()
+            
+            SCNTransaction.begin()
+            SCNTransaction.animationDuration = 0.3
+            
+            node.eulerAngles.y = min(max(node.eulerAngles.y, -physics.maxYaw), physics.maxYaw)
+            node.eulerAngles.x = min(max(node.eulerAngles.x, -physics.maxPitch), physics.maxPitch)
+            SCNTransaction.commit()
+        }
         
         @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
-            guard let node = cameraNode,
-                  let camera = camera,
-                  let view = gesture.view else { return }
-            
+            guard let node = cameraNode, let view = gesture.view else { return }
             currentViewSize = view.bounds.size
             
-            let currentVerticalFovRadians = Float(camera.fieldOfView) * .pi / 180
-            let currentHorizontalFovRadians = currentVerticalFovRadians * Float(currentViewSize.width / currentViewSize.height)
-            
-            let yawSensitivity = currentHorizontalFovRadians / Float(currentViewSize.width)
-            let pitchSensitivity = currentVerticalFovRadians / Float(currentViewSize.height)
-            
-            let maxYaw = max(0, (horizontalAngle / 2.0) - (currentHorizontalFovRadians / 2.0))
-            let maxPitch: Float = 20.0 * .pi / 180.0
+            let physics = getCameraPhysics()
             
             switch gesture.state {
             case .began:
                 displayLink?.invalidate()
                 displayLink = nil
-                
                 yawVelocity = 0
                 pitchVelocity = 0
                 fovVelocity = 0
@@ -255,11 +302,11 @@ struct SceneKitPanoramaView: UIViewRepresentable {
             case .changed:
                 let translation = gesture.translation(in: view)
                 
-                var newYaw = node.eulerAngles.y + Float(translation.x) * yawSensitivity
-                newYaw = min(max(newYaw, -maxYaw), maxYaw)
+                var newYaw = node.eulerAngles.y + Float(translation.x) * physics.yawSens
+                newYaw = min(max(newYaw, -physics.maxYaw), physics.maxYaw)
                 
-                var newPitch = node.eulerAngles.x + Float(translation.y) * pitchSensitivity
-                newPitch = min(max(newPitch, -maxPitch), maxPitch)
+                var newPitch = node.eulerAngles.x + Float(translation.y) * physics.pitchSens
+                newPitch = min(max(newPitch, -physics.maxPitch), physics.maxPitch)
                 
                 node.eulerAngles.y = newYaw
                 node.eulerAngles.x = newPitch
@@ -267,8 +314,8 @@ struct SceneKitPanoramaView: UIViewRepresentable {
                 
             case .ended, .cancelled:
                 let velocity = gesture.velocity(in: view)
-                yawVelocity = Float(velocity.x) * yawSensitivity / 60.0
-                pitchVelocity = Float(velocity.y) * pitchSensitivity / 60.0
+                yawVelocity = Float(velocity.x) * physics.yawSens / 60.0
+                pitchVelocity = Float(velocity.y) * physics.pitchSens / 60.0
                 startDeceleration()
                 
             default:
@@ -284,15 +331,20 @@ struct SceneKitPanoramaView: UIViewRepresentable {
                 initialFOV = camera.fieldOfView
                 displayLink?.invalidate()
                 displayLink = nil
-                
                 yawVelocity = 0
                 pitchVelocity = 0
                 fovVelocity = 0
                 
             case .changed:
                 var newFOV = initialFOV / gesture.scale
-                newFOV = max(20.0, min(newFOV, 90.0))
+                newFOV = max(20.0, min(newFOV, 80.0))
                 camera.fieldOfView = newFOV
+                
+                if let node = cameraNode {
+                    let physics = getCameraPhysics()
+                    node.eulerAngles.y = min(max(node.eulerAngles.y, -physics.maxYaw), physics.maxYaw)
+                    node.eulerAngles.x = min(max(node.eulerAngles.x, -physics.maxPitch), physics.maxPitch)
+                }
                 
             case .ended, .cancelled:
                 fovVelocity = -gesture.velocity * 0.5 / 60.0
@@ -312,35 +364,26 @@ struct SceneKitPanoramaView: UIViewRepresentable {
         }
         
         @objc private func updatePhysics() {
-            guard let node = cameraNode,
-                  let camera = camera else { return }
+            guard let node = cameraNode, let camera = camera else { return }
             
-            var newYaw = node.eulerAngles.y + yawVelocity
-            var newPitch = node.eulerAngles.x + pitchVelocity
+            let physics = getCameraPhysics()
             
-            let currentVerticalFov = Float(camera.fieldOfView) * .pi / 180.0
-            let currentHorizontalFov = currentVerticalFov * Float(currentViewSize.width / currentViewSize.height)
-            let maxYaw = max(0, (horizontalAngle / 2.0) - (currentHorizontalFov / 2.0))
-            let maxPitch: Float = 20.0 * .pi / 180.0
+            let newYaw = node.eulerAngles.y + yawVelocity
+            let newPitch = node.eulerAngles.x + pitchVelocity
             let newFov = camera.fieldOfView + fovVelocity
             
-            let clampedYaw = min(max(newYaw, -maxYaw), maxYaw)
-            let clampedPitch = min(max(newPitch, -maxPitch), maxPitch)
-            let clampedFov = max(20.0, min(newFov, 90.0))
+            let clampedYaw = min(max(newYaw, -physics.maxYaw), physics.maxYaw)
+            let clampedPitch = min(max(newPitch, -physics.maxPitch), physics.maxPitch)
+            let clampedFov = max(20.0, min(newFov, 80.0))
             
-            if clampedYaw != newYaw {
-                yawVelocity = 0
-            }
-            if clampedPitch != newPitch {
-                pitchVelocity = 0
-            }
-            if clampedFov != newFov {
-                fovVelocity = 0
-            }
-
+            if clampedYaw != newYaw { yawVelocity = 0 }
+            if clampedPitch != newPitch { pitchVelocity = 0 }
+            if clampedFov != newFov { fovVelocity = 0 }
+            
             node.eulerAngles.y = clampedYaw
             node.eulerAngles.x = clampedPitch
             camera.fieldOfView = clampedFov
+            
             yawVelocity *= 0.95
             pitchVelocity *= 0.95
             fovVelocity *= 0.85
@@ -354,18 +397,32 @@ struct SceneKitPanoramaView: UIViewRepresentable {
 }
 
 
+//MARK: - PanoramaDetailView
+
 struct PanoramaDetailView: View {
     let asset: PHAsset
     @State private var highResImage: UIImage?
     @State private var isLoading = true
+    @Environment(\.dismiss) var dismiss
+    
+    private var isBackButtonHidden: Bool {
+        if #available(iOS 26.0, *) {
+            return false
+        } else {
+            return true
+        }
+    }
     
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
             
             if let image = highResImage {
-                SceneKitPanoramaView(image: image)
-                    .ignoresSafeArea()
+                GeometryReader { geometry in
+                    SceneKitPanoramaView(image: image, size: geometry.size)
+                }
+                .ignoresSafeArea()
+                .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in }
             } else if isLoading {
                 ProgressView("Loading panorama...")
                     .tint(.white)
@@ -375,6 +432,23 @@ struct PanoramaDetailView: View {
                     .foregroundColor(.red)
             }
         }
+        .overlay(alignment: .topLeading) {
+            if isBackButtonHidden {
+                Button(action: {
+                    dismiss()
+                }) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(.primary)
+                        .frame(width: 44, height: 44)
+                        .background(.ultraThinMaterial)
+                        .clipShape(Circle())
+                        .shadow(color: .black.opacity(0.2), radius: 5)
+                }
+                .padding(.leading, 16)
+            }
+        }
+        .navigationBarBackButtonHidden(isBackButtonHidden)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
         .onAppear {
@@ -387,12 +461,30 @@ struct PanoramaDetailView: View {
         let options = PHImageRequestOptions()
         options.isNetworkAccessAllowed = true
         options.deliveryMode = .highQualityFormat
+        let maxSize = CGSize(width: 8192, height: 4096)
         
-        manager.requestImage(for: asset, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: options) { result, _ in
+        manager.requestImage(for: asset, targetSize: maxSize, contentMode: .aspectFit, options: options) { result, _ in
             DispatchQueue.main.async {
                 self.highResImage = result
                 self.isLoading = false
             }
         }
+    }
+}
+
+extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
+    override open func viewDidLoad() {
+        super.viewDidLoad()
+        if #available(iOS 26.0, *) {
+            return
+        }
+        interactivePopGestureRecognizer?.delegate = self
+    }
+
+    public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if #available(iOS 26.0, *) {
+            return false
+        }
+        return viewControllers.count > 1
     }
 }
