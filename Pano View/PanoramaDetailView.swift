@@ -404,6 +404,12 @@ struct PanoramaDetailView: View {
     @State private var highResImage: UIImage?
     @State private var isLoading = true
     @Environment(\.dismiss) var dismiss
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    
+    var isHorizontalLayout: Bool {
+        horizontalSizeClass == .regular
+        
+    }
     
     private var isBackButtonHidden: Bool {
         if #available(iOS 26.0, *) {
@@ -414,45 +420,152 @@ struct PanoramaDetailView: View {
     }
     
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            
-            if let image = highResImage {
-                GeometryReader { geometry in
-                    SceneKitPanoramaView(image: image, size: geometry.size)
+        GeometryReader { value in
+            let isLandscape = value.size.width > value.size.height
+            ZStack {
+                Color.clear.ignoresSafeArea()
+                
+                if let image = highResImage {
+                    GeometryReader { geometry in
+                        SceneKitPanoramaView(image: image, size: geometry.size)
+                    }
+                    .ignoresSafeArea()
+                    .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in }
+                } else if isLoading {
+                    ProgressView("Loading panorama...")
+                        .tint(.white)
+                        .foregroundColor(.white)
+                } else {
+                    Text("Error loading panorama.")
+                        .foregroundColor(.red)
                 }
-                .ignoresSafeArea()
-                .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in }
-            } else if isLoading {
-                ProgressView("Loading panorama...")
-                    .tint(.white)
-                    .foregroundColor(.white)
-            } else {
-                Text("Error loading panorama.")
-                    .foregroundColor(.red)
-            }
-        }
-        .overlay(alignment: .topLeading) {
-            if isBackButtonHidden {
-                Button(action: {
-                    dismiss()
-                }) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundColor(.primary)
-                        .frame(width: 44, height: 44)
-                        .background(.ultraThinMaterial)
-                        .clipShape(Circle())
-                        .shadow(color: .black.opacity(0.2), radius: 5)
+                
+                HStack {
+                    
                 }
-                .padding(.leading, 16)
             }
-        }
-        .navigationBarBackButtonHidden(isBackButtonHidden)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.hidden, for: .navigationBar)
-        .onAppear {
-            loadHighResImage()
+            .overlay(alignment: .topLeading) {
+                if isBackButtonHidden {
+                    Button(action: {
+                        dismiss()
+                    }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 20, weight: .medium))
+                            .foregroundColor(.primary)
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.clear)
+                    .background(.ultraThinMaterial)
+                    .frame(width: 44, height: 44)
+                    .clipShape(Circle())
+                    .shadow(color: .black.opacity(0.2), radius: 5)
+                    .padding(.leading, 16)
+                    .padding(.top, isHorizontalLayout ? 10 : 0)
+                    .padding(.top, isLandscape ? 10 : 0)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                if #unavailable(iOS 26.0) {
+                    Button(action: {
+                        
+                    }) {
+                        Image(systemName: "eye")
+                            .font(.system(size: 20, weight: .medium))
+                            .foregroundColor(.primary)
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.clear)
+                    .background(.ultraThinMaterial)
+                    .frame(width: 44, height: 44)
+                    .clipShape(Circle())
+                    .shadow(color: .black.opacity(0.2), radius: 5)
+                    .padding(.trailing, 16)
+                    .padding(.top, isHorizontalLayout ? 10 : 0)
+                    .padding(.top, isLandscape ? 10 : 0)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                }
+            }
+            .overlay(alignment: .bottomLeading) {
+                if #unavailable(iOS 26.0) {
+                    Button(action: {
+                        
+                    }) {
+                        Image(systemName: "arrow.left")
+                            .font(.system(size: 20, weight: .medium))
+                            .foregroundColor(.primary)
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.clear)
+                    .background(.ultraThinMaterial)
+                    .frame(width: 44, height: 44)
+                    .clipShape(Circle())
+                    .shadow(color: .black.opacity(0.2), radius: 5)
+                    .padding(.leading, 16)
+                    .padding(.bottom, isHorizontalLayout ? 10 : 0)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if #unavailable(iOS 26.0) {
+                    Button(action: {
+                        
+                    }) {
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 20, weight: .medium))
+                            .foregroundColor(.primary)
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.clear)
+                    .background(.ultraThinMaterial)
+                    .frame(width: 44, height: 44)
+                    .clipShape(Circle())
+                    .shadow(color: .black.opacity(0.2), radius: 5)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, isHorizontalLayout ? 10 : 0)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                }
+            }
+            .toolbar {
+                if #available(iOS 26.0, *) {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(action: {
+                            
+                        }) {
+                            Image(systemName: "eye")
+                        }
+                        
+                    }
+                    
+                    ToolbarItem(placement: .bottomBar) {
+
+                        Button(action: {
+                            
+                        }) {
+                            Image(systemName: "arrow.left")
+                        }
+                    }
+                    
+                    ToolbarSpacer(placement: .bottomBar)
+                    
+                    ToolbarItem(placement: .bottomBar) {
+                        Button(action: {
+                            
+                        }) {
+                            Image(systemName: "arrow.right")
+                        }
+                    }
+                }
+            }
+            .navigationBarBackButtonHidden(isBackButtonHidden)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .onAppear {
+                loadHighResImage()
+            }
         }
     }
     
@@ -480,7 +593,7 @@ extension UINavigationController: @retroactive UIGestureRecognizerDelegate {
         }
         interactivePopGestureRecognizer?.delegate = self
     }
-
+    
     public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         if #available(iOS 26.0, *) {
             return false

@@ -9,9 +9,17 @@ import Foundation
 import Combine
 import Photos
 
+struct PanoramaSection: Identifiable {
+    let year: Int
+    let assets: [PHAsset]
+    
+    var id: Int { year }
+}
+
 class PanoramaFetcher: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
     
     @Published var panoramas: [PHAsset] = []
+    @Published var groupedPanoramas: [PanoramaSection] = []
     @Published var accessGranted: Bool = false
     private var fetchResult: PHFetchResult<PHAsset>?
     
@@ -51,6 +59,28 @@ class PanoramaFetcher: NSObject, ObservableObject, PHPhotoLibraryChangeObserver 
         
         DispatchQueue.main.async {
             self.panoramas = fetchedAssets
+            self.fetchPanoramasSection()
+        }
+    }
+    
+    func fetchPanoramasSection() {
+        let calendar = Calendar.current
+        
+        let groupedDict = Dictionary(grouping: panoramas) { asset -> Int in
+            guard let date = asset.creationDate else { return 0 }
+            return calendar.component(.year, from: date)
+        }
+        
+        let sections = groupedDict.map { (year, assets) -> PanoramaSection in
+            let sortedAssets = assets.sorted {
+                ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast)
+            }
+            return PanoramaSection(year: year, assets: sortedAssets)
+        }
+            .sorted { $0.year > $1.year }
+        
+        DispatchQueue.main.async {
+            self.groupedPanoramas = sections
         }
     }
     
@@ -68,6 +98,7 @@ class PanoramaFetcher: NSObject, ObservableObject, PHPhotoLibraryChangeObserver 
                 }
                 
                 self.panoramas = updatedAssets
+                self.fetchPanoramasSection()
             }
         }
     }

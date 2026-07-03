@@ -10,7 +10,13 @@ import Photos
 
 struct ContentView: View {
     @EnvironmentObject var fetcher: PanoramaFetcher
-    let columns = [GridItem(.adaptive(minimum: 260))]
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    let columns = [GridItem(.adaptive(minimum: 260), spacing: 16)]
+    
+    var isHorizontalLayout: Bool {
+        horizontalSizeClass == .regular
+        
+    }
     
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -20,17 +26,27 @@ struct ContentView: View {
                         ZStack {
                             ScrollView {
                                 LazyVGrid(columns: columns, spacing: 16) {
-                                    ForEach(fetcher.panoramas, id: \.localIdentifier) { asset in
-                                        NavigationLink(destination: PanoramaDetailView(asset: asset)) {
-                                            GeometryReader { geometry in
-                                                ThumbnailView(asset: asset)
-                                                    .frame(width: geometry.size.width, height: 120)
-                                                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                                                    .shadow(color: .black.opacity(0.3), radius: 5)
+                                    ForEach(fetcher.groupedPanoramas) { section in
+                                        Section {
+                                            ForEach(section.assets, id: \.localIdentifier) { asset in
+                                                NavigationLink(destination: PanoramaDetailView(asset: asset)) {
+                                                    GeometryReader { geometry in
+                                                        ThumbnailView(asset: asset)
+                                                            .frame(width: geometry.size.width, height: 120)
+                                                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                                                            .shadow(color: .black.opacity(0.3), radius: 5)
+                                                    }
+                                                    .frame(height: 120)
+                                                }
+                                                .buttonStyle(.plain)
                                             }
-                                            .frame(height: 120)
+                                            
+                                        } header: {
+                                            Text(section.year == 0 ? "None" : String(section.year))
+                                                .font(.title2.bold())
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .padding(.top, 16)
                                         }
-                                        .buttonStyle(.plain)
                                     }
                                 }
                                 .padding()
@@ -59,28 +75,31 @@ struct ContentView: View {
                                     }
                                     .ignoresSafeArea()
                                 }
+                                
+                                
+                                VStack {
+                                    if #unavailable(iOS 26) {
+                                        Spacer()
+                                        Rectangle()
+                                            .fill(.background)
+                                            .frame(height: isLandscape ? 50 : 150)
+                                            .mask(
+                                                LinearGradient(
+                                                    stops: [
+                                                        .init(color: .clear, location: 0),
+                                                        .init(color: .black, location: 0.8)
+                                                    ],
+                                                    startPoint: .top,
+                                                    endPoint: .bottom
+                                                )
+                                                .blendMode(.multiply)
+                                            )
+                                            .allowsHitTesting(false)
+                                    }
+                                }
+                                .offset(y: 20)
+                                .ignoresSafeArea()
                             }
-                            
-                            VStack {
-                                Spacer()
-                                Rectangle()
-                                    .fill(.background)
-                                    .frame(height: 50)
-                                    .mask(
-                                        LinearGradient(
-                                            stops: [
-                                                .init(color: .clear, location: 0),
-                                                .init(color: .black, location: 0.8)
-                                            ],
-                                            startPoint: .top,
-                                            endPoint: .bottom
-                                        )
-                                        .blendMode(.multiply)
-                                    )
-                                    .allowsHitTesting(false)
-                            }
-                            .offset(y: 10)
-                            .ignoresSafeArea()
                         }
                     } else {
                         VStack(spacing: 20) {
@@ -97,29 +116,70 @@ struct ContentView: View {
                 }
                 .navigationTitle("Pano View")
                 .toolbarBackground(.hidden, for: .navigationBar)
-            }
-            .tint(.primary)
-            
-            Button(action: {
-                
-            }) {
-                if #available(iOS 26.0, *) {
-                    Image(systemName: "gear")
-                        .font(.system(size: 20, weight: .regular))
-                        .foregroundColor(.primary)
-                        .frame(width: 44, height: 44)
-                        .glassEffect()
-                } else {
-                    Image(systemName: "gear")
-                        .font(.system(size: 20, weight: .regular))
-                        .foregroundColor(.primary)
-                        .frame(width: 44, height: 44)
+                .toolbar {
+                    if #available(iOS 26.0, *) {
+                        ToolbarItem(placement: .bottomBar) {
+
+                            Button(action: {
+                                
+                            }) {
+                                Image(systemName: "arrow.up.arrow.down")
+                            }
+                        }
+                        
+                        ToolbarSpacer(placement: .bottomBar)
+                        
+                        ToolbarItem(placement: .bottomBar) {
+                            Button(action: {
+                                
+                            }) {
+                                Image(systemName: "gear")
+                            }
+                        }
+                    }
+                }
+                .overlay(alignment: .bottomLeading) {
+                    if #unavailable(iOS 26.0) {
+                        Button(action: {
+                        }) {
+                            Image(systemName: "arrow.up.arrow.down")
+                                .font(.system(size: 20, weight: .regular))
+                                .foregroundColor(.primary)
+                                .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.clear)
                         .background(.ultraThinMaterial)
+                        .frame(width: 44, height: 44 )
                         .clipShape(Circle())
                         .shadow(color: .black.opacity(0.2), radius: 5)
+                        .padding(.leading, 33)
+                        .padding(.bottom, 5)
+                        .padding(.bottom, isHorizontalLayout ? 10 : 0)
+                    }
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    if #unavailable(iOS 26.0) {
+                        Button(action: {
+                        }) {
+                            Image(systemName: "gear")
+                                .font(.system(size: 20, weight: .regular))
+                                .foregroundColor(.primary)
+                                .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.clear)
+                        .background(.ultraThinMaterial)
+                        .frame(width: 44, height: 44 )
+                        .clipShape(Circle())
+                        .shadow(color: .black.opacity(0.2), radius: 5)
+                        .padding(.trailing, 33)
+                        .padding(.bottom, 5)
+                        .padding(.bottom, isHorizontalLayout ? 10 : 0)
+                    }
                 }
             }
-            .padding(.trailing, 16)
+            .tint(.primary)
         }
         .onAppear {
             if PHPhotoLibrary.authorizationStatus() == .authorized {
