@@ -8,6 +8,7 @@
 import Foundation
 import Combine
 import Photos
+import UIKit
 
 struct PanoramaSection: Identifiable {
     let year: Int
@@ -33,21 +34,39 @@ class PanoramaFetcher: NSObject, ObservableObject, PHPhotoLibraryChangeObserver 
     }
     
     func requestAccess() {
-        PHPhotoLibrary.requestAuthorization(for: .readWrite) { [weak self] status in
-            DispatchQueue.main.async {
-                switch status {
-                case .authorized, .limited:
-                    self?.accessGranted = true
-                    self?.fetchPanoramas()
-                default:
-                    self?.accessGranted = false
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+
+        switch status {
+        case .notDetermined:
+            PHPhotoLibrary.requestAuthorization(for: .readWrite) { [weak self] newStatus in
+                DispatchQueue.main.async {
+                    self?.handleAuthorization(newStatus)
                 }
             }
+        default:
+            handleAuthorization(status)
+        }
+    }
+    
+    private func handleAuthorization(_ status: PHAuthorizationStatus) {
+        switch status {
+        case .authorized, .limited:
+            accessGranted = true
+            fetchPanoramas()
+            
+        case .denied, .restricted:
+            accessGranted = false
+            
+        case .notDetermined:
+            break
+            
+        @unknown default:
+            accessGranted = false
         }
     }
     
     private func fetchPanoramas() {
-       let fetchOptions = PHFetchOptions()
+        let fetchOptions = PHFetchOptions()
         fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         fetchOptions.predicate = NSPredicate(format: "(mediaSubtype & %d) != 0", PHAssetMediaSubtype.photoPanorama.rawValue)
         
@@ -102,5 +121,4 @@ class PanoramaFetcher: NSObject, ObservableObject, PHPhotoLibraryChangeObserver 
             }
         }
     }
-
 }

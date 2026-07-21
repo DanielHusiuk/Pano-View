@@ -28,7 +28,6 @@ struct SceneKitPanoramaView: UIViewRepresentable {
         
         //panorama
         let arcGeometry = createPanoramaArc(aspectRatio: aspectRatio, radius: 10.0, padding: 0.0)
-        let theta = arcGeometry.value(forKey: "theta") as? Float ?? .pi
         let material = SCNMaterial()
         material.diffuse.contents = image.cgImage
         material.isDoubleSided = false
@@ -43,10 +42,10 @@ struct SceneKitPanoramaView: UIViewRepresentable {
         scene.rootNode.addChildNode(arcNode)
         
         //shadow
-        let shadowGeometry = createPanoramaArc(aspectRatio: aspectRatio, radius: 10.2, padding: 2.5)
+        let shadowGeometry = createPanoramaArc(aspectRatio: aspectRatio, radius: 10.2, padding: 1.8)
         let shadowMaterial = SCNMaterial()
         
-        shadowMaterial.diffuse.contents = createDropShadow(aspectRatio: aspectRatio, theta: theta)
+        shadowMaterial.diffuse.contents = createDropShadow(aspectRatio: aspectRatio)
         shadowMaterial.isDoubleSided = false
         shadowMaterial.writesToDepthBuffer = false
         shadowGeometry.materials = [shadowMaterial]
@@ -57,8 +56,8 @@ struct SceneKitPanoramaView: UIViewRepresentable {
         scene.rootNode.addChildNode(shadowNode)
         
         //background
-        let backgroundGeometry = createPanoramaArc(aspectRatio: aspectRatio, radius: 15.0, expandScale: 6)
-        let tinySize = CGSize(width: 200, height: 200 / CGFloat(aspectRatio))
+        let backgroundGeometry = createPanoramaArc(aspectRatio: aspectRatio, radius: 15.0, expandScale: 4)
+        let tinySize = CGSize(width: 300, height: 300 / CGFloat(aspectRatio))
         let renderer = UIGraphicsImageRenderer(size: tinySize)
         let tinyImage = renderer.image { _ in
             image.draw(in: CGRect(origin: .zero, size: tinySize))
@@ -179,8 +178,8 @@ struct SceneKitPanoramaView: UIViewRepresentable {
     //MARK: - Corners & Shadow
     
     private func createCornerMask(aspectRatio: Float) -> UIImage {
-        let width: CGFloat = 1024
-        let height = width / CGFloat(aspectRatio)
+        let height: CGFloat = 512
+        let width = height * CGFloat(aspectRatio)
         let size = CGSize(width: width, height: height)
         
         let renderer = UIGraphicsImageRenderer(size: size)
@@ -189,22 +188,24 @@ struct SceneKitPanoramaView: UIViewRepresentable {
             context.fill(CGRect(origin: .zero, size: size))
             
             UIColor.white.setFill()
-            let path = UIBezierPath(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: width * 0.01)
+            let path = UIBezierPath(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: height * 0.04)
             path.fill()
         }
     }
     
-    private func createDropShadow(aspectRatio: Float, theta: Float) -> UIImage {
-        let width: CGFloat = 1024
-        let size = CGSize(width: width, height: width * 0.5)
-        let renderer = UIGraphicsImageRenderer(size: size)
+    private func createDropShadow(aspectRatio: Float) -> UIImage {
+        let height: CGFloat = 256
+        let width = height * CGFloat(aspectRatio)
+        let size = CGSize(width: width, height: height)
         
+        let renderer = UIGraphicsImageRenderer(size: size)
         let rawShadow = renderer.image { context in
-            let shadowWidth = size.width * CGFloat(theta / (.pi * 2.0))
-            let rect = CGRect(x: (size.width - shadowWidth) / 2, y: size.height * 0.1, width: shadowWidth, height: size.height * 0.8)
+            UIColor.clear.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
             
-            let path = UIBezierPath(roundedRect: rect, cornerRadius: width * 0.02)
             UIColor.black.setFill()
+            let rect = CGRect(origin: .zero, size: size)
+            let path = UIBezierPath(roundedRect: rect, cornerRadius: height * 0.06)
             path.fill()
         }
         
@@ -212,7 +213,7 @@ struct SceneKitPanoramaView: UIViewRepresentable {
               let blurFilter = CIFilter(name: "CIGaussianBlur") else { return rawShadow }
         
         blurFilter.setValue(ciImage, forKey: kCIInputImageKey)
-        blurFilter.setValue(15.0, forKey: kCIInputRadiusKey)
+        blurFilter.setValue(20.0, forKey: kCIInputRadiusKey)
         
         let context = CIContext()
         if let output = blurFilter.outputImage,
@@ -432,16 +433,12 @@ struct PanoramaDetailView: View {
                     .ignoresSafeArea()
                     .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in }
                 } else if isLoading {
-                    ProgressView("Loading panorama...")
-                        .tint(.white)
-                        .foregroundColor(.white)
+                    ProgressView()
+                        .tint(.primary)
                 } else {
                     Text("Error loading panorama.")
                         .foregroundColor(.red)
-                }
-                
-                HStack {
-                    
+                        .font(.system(size: 18, weight: .semibold))
                 }
             }
             .overlay(alignment: .topLeading) {
@@ -541,7 +538,7 @@ struct PanoramaDetailView: View {
                     }
                     
                     ToolbarItem(placement: .bottomBar) {
-
+                        
                         Button(action: {
                             
                         }) {

@@ -11,8 +11,9 @@ import Photos
 struct ContentView: View {
     @EnvironmentObject var fetcher: PanoramaFetcher
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    let columns = [GridItem(.adaptive(minimum: 260), spacing: 16)]
+    @Environment(\.scenePhase) private var scenePhase
     
+    let columns = [GridItem(.adaptive(minimum: 260), spacing: 16)]
     var isHorizontalLayout: Bool {
         horizontalSizeClass == .regular
         
@@ -82,7 +83,7 @@ struct ContentView: View {
                                         Spacer()
                                         Rectangle()
                                             .fill(.background)
-                                            .frame(height: isLandscape ? 50 : 150)
+                                            .frame(height: isLandscape ? 80 : 100)
                                             .mask(
                                                 LinearGradient(
                                                     stops: [
@@ -103,86 +104,103 @@ struct ContentView: View {
                         }
                     } else {
                         VStack(spacing: 20) {
-                            Text("App need access to your photo gallery")
+                            Text("To view your captured panoramas provide access to your photo gallery")
                                 .multilineTextAlignment(.center)
+                                .font(.system(size: 18, weight: .medium))
+                                .padding(.horizontal, 20)
+                                .padding(.bottom, 10)
                             
                             Button("Give Access") {
-                                fetcher.requestAccess()
+                                let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+                                if status == .denied || status == .restricted {
+                                    UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!)
+                                } else {
+                                    fetcher.requestAccess()
+                                }
                             }
                             .buttonStyle(.borderedProminent)
+                            .clipShape(.capsule)
+                            .font(.system(size: 20, weight: .semibold))
+                            .backgroundStyle(.foreground)
+                            .foregroundStyle(.background)
+                            .shadow(color: .black.opacity(0.2), radius: 10)
                         }
-                        .padding()
+                        .frame(alignment: .center)
+                        .animation(.easeInOut(duration: 0.1), value: fetcher.accessGranted)
                     }
                 }
                 .navigationTitle("Pano View")
                 .toolbarBackground(.hidden, for: .navigationBar)
+                .toolbarBackground(.hidden, for: .bottomBar)
                 .toolbar {
-                    if #available(iOS 26.0, *) {
+                    if #unavailable(iOS 26.0) {
                         ToolbarItem(placement: .bottomBar) {
-
                             Button(action: {
-                                
                             }) {
                                 Image(systemName: "arrow.up.arrow.down")
+                                    .font(.system(size: 20, weight: .regular))
+                                    .foregroundColor(.primary)
+                                    .frame(width: 44, height: 44)
                             }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.clear)
+                            .background(.ultraThinMaterial)
+                            .frame(width: 44, height: 44 )
+                            .clipShape(Circle())
+                            .shadow(color: .black.opacity(0.2), radius: 5)
+                            .padding(.leading, isHorizontalLayout ? 0 : 20)
+                            .padding(.bottom, isHorizontalLayout ? 10 : 0)
+                            .opacity(fetcher.accessGranted ? 1.0 : 0.0)
                         }
-                        
-                        ToolbarSpacer(placement: .bottomBar)
                         
                         ToolbarItem(placement: .bottomBar) {
                             Button(action: {
-                                
                             }) {
                                 Image(systemName: "gear")
+                                    .font(.system(size: 20, weight: .regular))
+                                    .foregroundColor(.primary)
+                                    .frame(width: 44, height: 44)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.clear)
+                            .background(.ultraThinMaterial)
+                            .frame(width: 44, height: 44 )
+                            .clipShape(Circle())
+                            .shadow(color: .black.opacity(0.2), radius: 5)
+                            .padding(.trailing, isHorizontalLayout ? 0 : 20)
+                            .padding(.bottom, isHorizontalLayout ? 10 : 0)
+                            .opacity(fetcher.accessGranted ? 1.0 : 0.0)
+                        }
+                    }
+                    
+                    if #available(iOS 26.0, *) {
+                        if fetcher.accessGranted {
+                            ToolbarItem(placement: .bottomBar) {
+                                Button(action: {
+                                    
+                                }) {
+                                    Image(systemName: "arrow.up.arrow.down")
+                                }
+                            }
+                            
+                            ToolbarSpacer(placement: .bottomBar)
+                            
+                            ToolbarItem(placement: .bottomBar) {
+                                Button(action: {
+                                    
+                                }) {
+                                    Image(systemName: "gear")
+                                }
                             }
                         }
-                    }
-                }
-                .overlay(alignment: .bottomLeading) {
-                    if #unavailable(iOS 26.0) {
-                        Button(action: {
-                        }) {
-                            Image(systemName: "arrow.up.arrow.down")
-                                .font(.system(size: 20, weight: .regular))
-                                .foregroundColor(.primary)
-                                .frame(width: 44, height: 44)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.clear)
-                        .background(.ultraThinMaterial)
-                        .frame(width: 44, height: 44 )
-                        .clipShape(Circle())
-                        .shadow(color: .black.opacity(0.2), radius: 5)
-                        .padding(.leading, 33)
-                        .padding(.bottom, 5)
-                        .padding(.bottom, isHorizontalLayout ? 10 : 0)
-                    }
-                }
-                .overlay(alignment: .bottomTrailing) {
-                    if #unavailable(iOS 26.0) {
-                        Button(action: {
-                        }) {
-                            Image(systemName: "gear")
-                                .font(.system(size: 20, weight: .regular))
-                                .foregroundColor(.primary)
-                                .frame(width: 44, height: 44)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.clear)
-                        .background(.ultraThinMaterial)
-                        .frame(width: 44, height: 44 )
-                        .clipShape(Circle())
-                        .shadow(color: .black.opacity(0.2), radius: 5)
-                        .padding(.trailing, 33)
-                        .padding(.bottom, 5)
-                        .padding(.bottom, isHorizontalLayout ? 10 : 0)
                     }
                 }
             }
             .tint(.primary)
+            .animation(.easeInOut(duration: 0.3), value: fetcher.accessGranted)
         }
-        .onAppear {
-            if PHPhotoLibrary.authorizationStatus() == .authorized {
+        .onChange(of: scenePhase) { phase in
+            if phase == .active {
                 fetcher.requestAccess()
             }
         }
