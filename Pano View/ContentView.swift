@@ -12,34 +12,39 @@ struct ContentView: View {
     @EnvironmentObject var fetcher: PanoramaFetcher
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("HapticState") private var isHapticEnabled = true
     
     let columns = [GridItem(.adaptive(minimum: 260), spacing: 16)]
     var isHorizontalLayout: Bool {
         horizontalSizeClass == .regular
-        
     }
     
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        ZStack() {
             NavigationStack {
                 Group {
-                    if fetcher.accessGranted {
+                    switch fetcher.authState {
+                    case .authorized:
                         ZStack {
                             ScrollView {
                                 LazyVGrid(columns: columns, spacing: 16) {
                                     ForEach(fetcher.groupedPanoramas) { section in
                                         Section {
                                             ForEach(section.assets, id: \.localIdentifier) { asset in
-                                                NavigationLink(destination: PanoramaDetailView(asset: asset)) {
-                                                    GeometryReader { geometry in
-                                                        ThumbnailView(asset: asset)
-                                                            .frame(width: geometry.size.width, height: 120)
-                                                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                                                            .shadow(color: .black.opacity(0.3), radius: 5)
+                                                if let index = fetcher.panoramas.firstIndex(where: {
+                                                    $0.localIdentifier == asset.localIdentifier
+                                                }) {
+                                                    NavigationLink(destination: PanoramaDetailView(currentIndex: index)) {
+                                                        GeometryReader { geometry in
+                                                            ThumbnailView(asset: asset)
+                                                                .frame(width: geometry.size.width, height: 120)
+                                                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                                                .shadow(color: .black.opacity(0.3), radius: 5)
+                                                        }
+                                                        .frame(height: 120)
                                                     }
-                                                    .frame(height: 120)
+                                                    .buttonStyle(.plain)
                                                 }
-                                                .buttonStyle(.plain)
                                             }
                                             
                                         } header: {
@@ -77,7 +82,6 @@ struct ContentView: View {
                                     .ignoresSafeArea()
                                 }
                                 
-                                
                                 VStack {
                                     if #unavailable(iOS 26) {
                                         Spacer()
@@ -102,7 +106,12 @@ struct ContentView: View {
                                 .ignoresSafeArea()
                             }
                         }
-                    } else {
+                        .transition(.opacity)
+                    case .notDetermined:
+                        Color.clear
+                            .ignoresSafeArea()
+                            .transition(.opacity)
+                    case .denied:
                         VStack(spacing: 20) {
                             Text("To view your captured panoramas provide access to your photo gallery")
                                 .multilineTextAlignment(.center)
@@ -126,7 +135,7 @@ struct ContentView: View {
                             .shadow(color: .black.opacity(0.2), radius: 10)
                         }
                         .frame(alignment: .center)
-                        .animation(.easeInOut(duration: 0.1), value: fetcher.accessGranted)
+                        .transition(.opacity)
                     }
                 }
                 .navigationTitle("Pano View")
@@ -134,50 +143,55 @@ struct ContentView: View {
                 .toolbarBackground(.hidden, for: .bottomBar)
                 .toolbar {
                     if #unavailable(iOS 26.0) {
-                        ToolbarItem(placement: .bottomBar) {
+                        ToolbarItemGroup(placement: .bottomBar) {
                             Button(action: {
+                                if isHapticEnabled {
+                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                }
                             }) {
                                 Image(systemName: "arrow.up.arrow.down")
-                                    .font(.system(size: 20, weight: .regular))
+                                    .font(.system(size: 16, weight: .regular))
                                     .foregroundColor(.primary)
-                                    .frame(width: 44, height: 44)
                             }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.clear)
-                            .background(.ultraThinMaterial)
-                            .frame(width: 44, height: 44 )
-                            .clipShape(Circle())
-                            .shadow(color: .black.opacity(0.2), radius: 5)
+                            .buttonStyle(CircularButtonStyle())
                             .padding(.leading, isHorizontalLayout ? 0 : 20)
                             .padding(.bottom, isHorizontalLayout ? 10 : 0)
-                            .opacity(fetcher.accessGranted ? 1.0 : 0.0)
-                        }
+                            .opacity(fetcher.isAuthorized ? 1.0 : 0.0)
                         
-                        ToolbarItem(placement: .bottomBar) {
+                            Spacer()
+                        
+                            Text("panorama_count \(fetcher.panoramas.count)")
+                                .font(.system(size: 16, weight: .semibold))
+                                .frame(alignment: .center)
+                                .padding(.bottom, isHorizontalLayout ? 10 : 0)
+                                .shadow(color: Color(uiColor: .systemBackground), radius: 10)
+                                .opacity(fetcher.isAuthorized ? 1.0 : 0.0)
+                            
+                            Spacer()
+                            
                             Button(action: {
+                                if isHapticEnabled {
+                                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                }
                             }) {
                                 Image(systemName: "gear")
-                                    .font(.system(size: 20, weight: .regular))
+                                    .font(.system(size: 16, weight: .regular))
                                     .foregroundColor(.primary)
-                                    .frame(width: 44, height: 44)
                             }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.clear)
-                            .background(.ultraThinMaterial)
-                            .frame(width: 44, height: 44 )
-                            .clipShape(Circle())
-                            .shadow(color: .black.opacity(0.2), radius: 5)
+                            .buttonStyle(CircularButtonStyle())
                             .padding(.trailing, isHorizontalLayout ? 0 : 20)
                             .padding(.bottom, isHorizontalLayout ? 10 : 0)
-                            .opacity(fetcher.accessGranted ? 1.0 : 0.0)
+                            .opacity(fetcher.isAuthorized ? 1.0 : 0.0)
                         }
                     }
                     
                     if #available(iOS 26.0, *) {
-                        if fetcher.accessGranted {
+                        if fetcher.isAuthorized {
                             ToolbarItem(placement: .bottomBar) {
                                 Button(action: {
-                                    
+                                    if isHapticEnabled {
+                                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                    }
                                 }) {
                                     Image(systemName: "arrow.up.arrow.down")
                                 }
@@ -186,8 +200,20 @@ struct ContentView: View {
                             ToolbarSpacer(placement: .bottomBar)
                             
                             ToolbarItem(placement: .bottomBar) {
+                                Text("panorama_count \(fetcher.panoramas.count)")
+                                    .frame(minWidth: 80 ,maxWidth: 200, alignment: .center)
+                                    .padding(.horizontal, 10)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                            }
+                            
+                            ToolbarSpacer(placement: .bottomBar)
+                            
+                            ToolbarItem(placement: .bottomBar) {
                                 Button(action: {
-                                    
+                                    if isHapticEnabled {
+                                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                    }
                                 }) {
                                     Image(systemName: "gear")
                                 }
@@ -197,7 +223,7 @@ struct ContentView: View {
                 }
             }
             .tint(.primary)
-            .animation(.easeInOut(duration: 0.3), value: fetcher.accessGranted)
+            .transition(.opacity)
         }
         .onChange(of: scenePhase) { phase in
             if phase == .active {

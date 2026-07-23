@@ -8,60 +8,77 @@
 import Foundation
 import Combine
 import Photos
-import UIKit
+
+// 1. Впровадження тристанової моделі авторизації
+enum AuthState {
+    case notDetermined
+    case authorized
+    case denied
+}
 
 struct PanoramaSection: Identifiable {
     let year: Int
     let assets: [PHAsset]
-    
     var id: Int { year }
 }
 
+@MainActor
 class PanoramaFetcher: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
-    
     @Published var panoramas: [PHAsset] = []
     @Published var groupedPanoramas: [PanoramaSection] = []
-    @Published var accessGranted: Bool = false
+    @Published var authState: AuthState = .notDetermined
+    
     private var fetchResult: PHFetchResult<PHAsset>?
+    var isAuthorized: Bool {
+        return authState == .authorized
+    }
     
     override init() {
         super.init()
         PHPhotoLibrary.shared().register(self)
+        checkInitialStatus()
     }
     
     deinit {
         PHPhotoLibrary.shared().unregisterChangeObserver(self)
     }
     
+    private func checkInitialStatus() {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        handleAuthorization(status)
+    }
+    
     func requestAccess() {
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-
-        switch status {
-        case .notDetermined:
-            PHPhotoLibrary.requestAuthorization(for: .readWrite) { [weak self] newStatus in
-                DispatchQueue.main.async {
-                    self?.handleAuthorization(newStatus)
-                }
-            }
-        default:
+        
+        guard status == .notDetermined else {
             handleAuthorization(status)
+            return
+        }
+        
+        PHPhotoLibrary.requestAuthorization(for: .readWrite) { [weak self] newStatus in
+            DispatchQueue.main.async {
+                self?.handleAuthorization(newStatus)
+            }
         }
     }
     
     private func handleAuthorization(_ status: PHAuthorizationStatus) {
         switch status {
         case .authorized, .limited:
-            accessGranted = true
-            fetchPanoramas()
+            authState = .authorized
+            if fetchResult == nil {
+                fetchPanoramas()
+            }
             
         case .denied, .restricted:
-            accessGranted = false
+            authState = .denied
             
         case .notDetermined:
-            break
+            authState = .notDetermined
             
         @unknown default:
-            accessGranted = false
+            authState = .denied
         }
     }
     
@@ -70,19 +87,19 @@ class PanoramaFetcher: NSObject, ObservableObject, PHPhotoLibraryChangeObserver 
         fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         fetchOptions.predicate = NSPredicate(format: "(mediaSubtype & %d) != 0", PHAssetMediaSubtype.photoPanorama.rawValue)
         
-        self.fetchResult = PHAsset.fetchAssets(with: .image, options: fetchOptions)
+        let result = PHAsset.fetchAssets(with: .image, options: fetchOptions)
+        self.fetchResult = result
+        
         var fetchedAssets: [PHAsset] = []
-        self.fetchResult?.enumerateObjects { (asset, index, stop) in
+        result.enumerateObjects { (asset, _, _) in
             fetchedAssets.append(asset)
         }
         
-        DispatchQueue.main.async {
-            self.panoramas = fetchedAssets
-            self.fetchPanoramasSection()
-        }
+        self.panoramas = fetchedAssets
+        self.fetchPanoramasSection()
     }
     
-    func fetchPanoramasSection() {
+    private func fetchPanoramasSection() {
         let calendar = Calendar.current
         
         let groupedDict = Dictionary(grouping: panoramas) { asset -> Int in
@@ -91,23 +108,26 @@ class PanoramaFetcher: NSObject, ObservableObject, PHPhotoLibraryChangeObserver 
         }
         
         let sections = groupedDict.map { (year, assets) -> PanoramaSection in
-            let sortedAssets = assets.sorted {
-                ($0.creationDate ?? .distantPast) > ($1.creationDate ?? .distantPast)
+            let sortedAssets = assets.sorted { a, b in
+                guard let dateA = a.creationDate, let dateB = b.creationDate else { return false }
+                return dateA > dateB
             }
             return PanoramaSection(year: year, assets: sortedAssets)
-        }
-            .sorted { $0.year > $1.year }
+        }.sorted { $0.year > $1.year }
         
         DispatchQueue.main.async {
             self.groupedPanoramas = sections
         }
     }
     
-    func photoLibraryDidChange(_ changeInstance: PHChange) {
-        guard let currentFetchResult = self.fetchResult,
-              let changes = changeInstance.changeDetails(for: currentFetchResult) else { return }
+    nonisolated func photoLibraryDidChange(_ changeInstance: PHChange) {
         
-        DispatchQueue.main.async {
+        Task { @MainActor [weak self] in
+            guard let self = self else { return }
+            
+            guard let currentFetchResult = self.fetchResult,
+                  let changes = changeInstance.changeDetails(for: currentFetchResult) else { return }
+            
             self.fetchResult = changes.fetchResultAfterChanges
             
             if changes.hasIncrementalChanges || changes.hasMoves {

@@ -26,7 +26,8 @@ struct SceneKitPanoramaView: UIViewRepresentable {
         let scene = SCNScene()
         let aspectRatio = Float(image.size.width / image.size.height)
         
-        //panorama
+        //MARK: - Panorama
+        
         let arcGeometry = createPanoramaArc(aspectRatio: aspectRatio, radius: 10.0, padding: 0.0)
         let material = SCNMaterial()
         material.diffuse.contents = image.cgImage
@@ -55,7 +56,8 @@ struct SceneKitPanoramaView: UIViewRepresentable {
         shadowNode.renderingOrder = 0
         scene.rootNode.addChildNode(shadowNode)
         
-        //background
+        //MARK: - Background
+        
         let backgroundGeometry = createPanoramaArc(aspectRatio: aspectRatio, radius: 15.0, expandScale: 4)
         let tinySize = CGSize(width: 300, height: 300 / CGFloat(aspectRatio))
         let renderer = UIGraphicsImageRenderer(size: tinySize)
@@ -88,7 +90,8 @@ struct SceneKitPanoramaView: UIViewRepresentable {
         backgroundNode.renderingOrder = -1
         scene.rootNode.addChildNode(backgroundNode)
         
-        //camera
+        //MARK: - Camera
+        
         let camera = SCNCamera()
         camera.fieldOfView = 80.0
         
@@ -122,6 +125,8 @@ struct SceneKitPanoramaView: UIViewRepresentable {
             context.coordinator.animateCameraBounds()
         }
     }
+    
+    //MARK: - Create Arc
     
     private func createPanoramaArc(aspectRatio: Float, radius: Float = 10.0, padding: Float = 0.0, expandScale: Float = 1.0) -> SCNGeometry {
         let verticalFOVRadians: Float = 65.0 * .pi / 180.0
@@ -401,23 +406,37 @@ struct SceneKitPanoramaView: UIViewRepresentable {
 //MARK: - PanoramaDetailView
 
 struct PanoramaDetailView: View {
-    let asset: PHAsset
+    @State private var currentIndex: Int
     @State private var highResImage: UIImage?
     @State private var isLoading = true
+    @State private var isInterfaceHidden = false
+    
+    @EnvironmentObject var fetcher: PanoramaFetcher
     @Environment(\.dismiss) var dismiss
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @AppStorage("HapticState") private var isHapticEnabled = true
+    
+    init(currentIndex: Int) {
+        _currentIndex = State(initialValue: currentIndex)
+    }
+    
+    private var asset: PHAsset {
+        fetcher.panoramas[currentIndex]
+    }
+    
+    private var formattedDate: String {
+        guard let date = asset.creationDate else { return "Unknown date" }
+        return date.formatted(date: .long, time: .omitted)
+    }
+    
+    private var formattedTime: String {
+        guard let date = asset.creationDate else { return "--:--" }
+        return date.formatted(date: .omitted, time: .shortened)
+    }
     
     var isHorizontalLayout: Bool {
         horizontalSizeClass == .regular
         
-    }
-    
-    private var isBackButtonHidden: Bool {
-        if #available(iOS 26.0, *) {
-            return false
-        } else {
-            return true
-        }
     }
     
     var body: some View {
@@ -429,6 +448,7 @@ struct PanoramaDetailView: View {
                 if let image = highResImage {
                     GeometryReader { geometry in
                         SceneKitPanoramaView(image: image, size: geometry.size)
+                            .id(asset.localIdentifier)
                     }
                     .ignoresSafeArea()
                     .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in }
@@ -440,133 +460,357 @@ struct PanoramaDetailView: View {
                         .foregroundColor(.red)
                         .font(.system(size: 18, weight: .semibold))
                 }
+                
+                GeometryReader { value in
+                    VStack {
+                        Rectangle()
+                            .fill(.black.opacity(0.5))
+                            .frame(height: isLandscape ? 40 : 80)
+                            .mask(
+                                LinearGradient(
+                                    stops: [
+                                        .init(color: .clear, location: 0.0),
+                                        .init(color: .black, location: 1.0)
+                                    ],
+                                    startPoint: .bottom,
+                                    endPoint: .top
+                                )
+                                .blendMode(.multiply)
+                            )
+                            .allowsHitTesting(false)
+                        Spacer()
+                    }
+                    .ignoresSafeArea()
+                    .opacity(isInterfaceHidden ? 0.0 : 1.0)
+                    .disabled(isInterfaceHidden)
+                    .animation(.easeInOut(duration: 0.15), value: isInterfaceHidden)
+                    
+                    VStack {
+                        Spacer()
+                        Rectangle()
+                            .fill(.black.opacity(0.5))
+                            .frame(height: isLandscape ? 60 : 80)
+                            .mask(
+                                LinearGradient(
+                                    stops: [
+                                        .init(color: .clear, location: 0),
+                                        .init(color: .black, location: 1.0)
+                                    ],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                                .blendMode(.multiply)
+                            )
+                            .allowsHitTesting(false)
+                    }
+                    .offset(y: 20)
+                    .ignoresSafeArea()
+                    .opacity(isInterfaceHidden ? 0.0 : 1.0)
+                    .disabled(isInterfaceHidden)
+                    .animation(.easeInOut(duration: 0.15), value: isInterfaceHidden)
+                }
             }
+            
+            //MARK: - iOS 16 UI
+            
             .overlay(alignment: .topLeading) {
-                if isBackButtonHidden {
+                if #unavailable(iOS 26.0) {
                     Button(action: {
                         dismiss()
+                        if isHapticEnabled {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        }
                     }) {
                         Image(systemName: "xmark")
-                            .font(.system(size: 20, weight: .medium))
+                            .font(.system(size: 20, weight: .regular))
                             .foregroundColor(.primary)
-                            .frame(width: 44, height: 44)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.clear)
-                    .background(.ultraThinMaterial)
-                    .frame(width: 44, height: 44)
-                    .clipShape(Circle())
-                    .shadow(color: .black.opacity(0.2), radius: 5)
+                    .buttonStyle(CircularButtonStyle())
                     .padding(.leading, 16)
                     .padding(.top, isHorizontalLayout ? 10 : 0)
                     .padding(.top, isLandscape ? 10 : 0)
+                    .opacity(isInterfaceHidden ? 0.0 : 1.0)
+                    .disabled(isInterfaceHidden)
+                    .animation(.easeInOut(duration: 0.15), value: isInterfaceHidden)
+                }
+            }
+            .overlay(alignment: .top) {
+                if #unavailable(iOS 26.0) {
+                    Button {
+                        
+                    } label: {
+                        VStack(alignment: .center, content: {
+                            Text(formattedDate)
+                                .font(.system(size: 16, weight: .semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                            
+                            Text(formattedTime)
+                                .font(.system(size: 10, weight: .semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        })
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, -0.5)
+                    }
+                    .allowsHitTesting(false)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.clear)
+                    .foregroundStyle(.primary)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .clipShape(Capsule())
+                    .frame(minWidth: 80 ,maxWidth: 200, alignment: .center)
+                    .shadow(color: .black.opacity(0.2), radius: 5)
+                    .padding(.top, isHorizontalLayout ? 10 : 0)
+                    .padding(.top, isLandscape ? 10 : 0)
+                    .opacity(isInterfaceHidden ? 0.0 : 1.0)
+                    .disabled(isInterfaceHidden)
+                    .animation(.easeInOut(duration: 0.15), value: isInterfaceHidden)
                 }
             }
             .overlay(alignment: .topTrailing) {
                 if #unavailable(iOS 26.0) {
                     Button(action: {
-                        
+                        isInterfaceHidden.toggle()
+                        if isHapticEnabled {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        }
                     }) {
-                        Image(systemName: "eye")
-                            .font(.system(size: 20, weight: .medium))
-                            .foregroundColor(.primary)
+                        Image(systemName: isInterfaceHidden ? "eye" : "eye.slash")
+                            .font(.system(size: 20, weight: .regular))
+                            .foregroundColor(.primary.opacity(isInterfaceHidden ? 0.1 : 1.0))
                             .frame(width: 44, height: 44)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.clear)
-                    .background(.ultraThinMaterial)
-                    .frame(width: 44, height: 44)
-                    .clipShape(Circle())
-                    .shadow(color: .black.opacity(0.2), radius: 5)
+                    .buttonStyle(CircularButtonStyle(backgroundStyle: AnyShapeStyle(.ultraThinMaterial.opacity(isInterfaceHidden ? 0.0 : 1.0))))
                     .padding(.trailing, 16)
                     .padding(.top, isHorizontalLayout ? 10 : 0)
                     .padding(.top, isLandscape ? 10 : 0)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .animation(.easeInOut(duration: 0.15), value: isInterfaceHidden)
                 }
             }
             .overlay(alignment: .bottomLeading) {
                 if #unavailable(iOS 26.0) {
                     Button(action: {
-                        
+                        guard currentIndex > 0 else { return }
+                        currentIndex -= 1
+                        if isHapticEnabled {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        }
                     }) {
                         Image(systemName: "arrow.left")
-                            .font(.system(size: 20, weight: .medium))
+                            .font(.system(size: 20, weight: .regular))
                             .foregroundColor(.primary)
-                            .frame(width: 44, height: 44)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.clear)
-                    .background(.ultraThinMaterial)
-                    .frame(width: 44, height: 44)
-                    .clipShape(Circle())
-                    .shadow(color: .black.opacity(0.2), radius: 5)
+                    .buttonStyle(CircularButtonStyle())
                     .padding(.leading, 16)
                     .padding(.bottom, isHorizontalLayout ? 10 : 0)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .opacity(isInterfaceHidden ? 0.0 : 1.0)
+                    .disabled(isInterfaceHidden)
+                    .animation(.easeInOut(duration: 0.15), value: isInterfaceHidden)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if #unavailable(iOS 26.0) {
+                    Button {
+                        
+                    } label: {
+                        Text("\(currentIndex + 1) of \(fetcher.panoramas.count)")
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(alignment: .center)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .padding(.vertical, 5)
+                            .padding(.horizontal, 5)
+                    }
+                    .allowsHitTesting(false)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.clear)
+                    .foregroundStyle(.primary)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .clipShape(Capsule())
+                    .shadow(color: .black.opacity(0.2), radius: 5)
+                    .padding(.bottom, isHorizontalLayout ? 10 : 0)
+                    .opacity(isInterfaceHidden ? 0.0 : 1.0)
+                    .disabled(isInterfaceHidden)
+                    .animation(.easeInOut(duration: 0.15), value: isInterfaceHidden)
                 }
             }
             .overlay(alignment: .bottomTrailing) {
                 if #unavailable(iOS 26.0) {
                     Button(action: {
-                        
+                        guard currentIndex < fetcher.panoramas.count - 1 else { return }
+                        currentIndex += 1
+                        if isHapticEnabled {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        }
                     }) {
                         Image(systemName: "arrow.right")
-                            .font(.system(size: 20, weight: .medium))
+                            .font(.system(size: 20, weight: .regular))
                             .foregroundColor(.primary)
-                            .frame(width: 44, height: 44)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.clear)
-                    .background(.ultraThinMaterial)
-                    .frame(width: 44, height: 44)
-                    .clipShape(Circle())
-                    .shadow(color: .black.opacity(0.2), radius: 5)
+                    .buttonStyle(CircularButtonStyle())
                     .padding(.trailing, 16)
                     .padding(.bottom, isHorizontalLayout ? 10 : 0)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .opacity(isInterfaceHidden ? 0.0 : 1.0)
+                    .disabled(isInterfaceHidden)
+                    .animation(.easeInOut(duration: 0.15), value: isInterfaceHidden)
                 }
             }
-            .toolbar {
+            
+            //MARK: - iOS 26 UI
+            
+            .overlay(alignment: .topLeading) {
                 if #available(iOS 26.0, *) {
-                    ToolbarItem(placement: .topBarTrailing) {
+                    Group {
                         Button(action: {
-                            
+                            dismiss()
+                            if isHapticEnabled {
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            }
                         }) {
-                            Image(systemName: "eye")
+                            Image(systemName: "xmark")
+                                .font(.system(size: 20, weight: .regular))
+                                .contentTransition(.symbolEffect(.replace))
+                                .frame(width: 44, height: 44)
                         }
-                        
+                        .frame(width: 44, height: 44)
+                        .glassEffect(.regular.interactive())
+                        .padding(.leading)
+                        .opacity(isInterfaceHidden ? 0.0 : 1.0)
+                        .disabled(isInterfaceHidden)
+                        .animation(.easeInOut(duration: 0.15), value: isInterfaceHidden)
                     }
-                    
-                    ToolbarItem(placement: .bottomBar) {
-                        
-                        Button(action: {
-                            
-                        }) {
-                            Image(systemName: "arrow.left")
-                        }
-                    }
-                    
-                    ToolbarSpacer(placement: .bottomBar)
-                    
-                    ToolbarItem(placement: .bottomBar) {
-                        Button(action: {
-                            
-                        }) {
-                            Image(systemName: "arrow.right")
-                        }
-                    }
+                    .padding(.top, isLandscape ? 10 : 0)
                 }
             }
-            .navigationBarBackButtonHidden(isBackButtonHidden)
-            .navigationBarTitleDisplayMode(.inline)
+            .overlay(alignment: .top) {
+                if #available(iOS 26.0, *) {
+                    Group {
+                        VStack(alignment: .center, content: {
+                            Text(formattedDate)
+                                .font(.system(size: 16, weight: .semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                            
+                            Text(formattedTime)
+                                .font(.system(size: 10, weight: .semibold))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        })
+                        .frame(minWidth: 80 ,maxWidth: 200, alignment: .center)
+                        .padding(.horizontal, -6)
+                        .padding(.vertical, 6)
+                        .glassEffect(.regular.interactive())
+                        .opacity(isInterfaceHidden ? 0.0 : 1.0)
+                        .disabled(isInterfaceHidden)
+                        .animation(.easeInOut(duration: 0.15), value: isInterfaceHidden)
+                    }
+                    .padding(.top, isLandscape ? 10 : 0)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                if #available(iOS 26.0, *) {
+                    Group {
+                        Button(action: {
+                            isInterfaceHidden.toggle()
+                            if isHapticEnabled {
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                            }
+                        }) {
+                            Image(systemName: isInterfaceHidden ? "eye" : "eye.slash")
+                                .font(.system(size: 20, weight: .regular))
+                                .contentTransition(.symbolEffect(.replace))
+                                .frame(width: 44, height: 44)
+                        }
+                        .frame(width: 44, height: 44)
+                        .glassEffect(.regular.interactive())
+                        .padding(.trailing)
+                        .animation(.easeInOut(duration: 0.15), value: isInterfaceHidden)
+                    }
+                    .padding(.top, isLandscape ? 10 : 0)
+                }
+            }
+            .overlay(alignment: .bottomLeading) {
+                if #available(iOS 26.0, *) {
+                    Button(action: {
+                        guard currentIndex > 0 else { return }
+                        currentIndex -= 1
+                        if isHapticEnabled {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        }
+                    }) {
+                        Image(systemName: "arrow.left")
+                            .font(.system(size: 20, weight: .regular))
+                            .contentTransition(.symbolEffect(.replace))
+                            .frame(width: 44, height: 44)
+                    }
+                    .frame(width: 44, height: 44)
+                    .glassEffect(.regular.interactive())
+                    .padding(.leading)
+                    .opacity(isInterfaceHidden ? 0.0 : 1.0)
+                    .disabled(isInterfaceHidden)
+                    .animation(.easeInOut(duration: 0.15), value: isInterfaceHidden)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if #available(iOS 26.0, *) {
+                    Button {
+                        
+                    } label: {
+                        Text("\(currentIndex + 1) of \(fetcher.panoramas.count)")
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(alignment: .center)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .padding(.horizontal, 5)
+                    }
+                    .frame(minWidth: 60 ,maxWidth: 100, minHeight: 44, maxHeight: 44, alignment: .center)
+                    .glassEffect(.regular.interactive())
+                    .opacity(isInterfaceHidden ? 0.0 : 1.0)
+                    .disabled(isInterfaceHidden)
+                    .animation(.easeInOut(duration: 0.15), value: isInterfaceHidden)
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if #available(iOS 26.0, *) {
+                    Button(action: {
+                        guard currentIndex < fetcher.panoramas.count - 1 else { return }
+                        currentIndex += 1
+                        if isHapticEnabled {
+                            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        }
+                    }) {
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 20, weight: .regular))
+                            .contentTransition(.symbolEffect(.replace))
+                            .frame(width: 44, height: 44)
+                    }
+                    .frame(width: 44, height: 44)
+                    .glassEffect(.regular.interactive())
+                    .padding(.trailing)
+                    .opacity(isInterfaceHidden ? 0.0 : 1.0)
+                    .disabled(isInterfaceHidden)
+                    .animation(.easeInOut(duration: 0.15), value: isInterfaceHidden)
+                }
+            }
+            .navigationBarBackButtonHidden(true)
             .toolbarBackground(.hidden, for: .navigationBar)
             .onAppear {
+                loadHighResImage()
+            }
+            .onChange(of: currentIndex) { _ in
                 loadHighResImage()
             }
         }
     }
     
+    //MARK: - Other
+    
     private func loadHighResImage() {
+        highResImage = nil
+        isLoading = true
         let manager = PHImageManager.default()
         let options = PHImageRequestOptions()
         options.isNetworkAccessAllowed = true
