@@ -1,5 +1,5 @@
 //
-//  Pano_ViewUITestsLaunchTests.swift
+//  PanoViewUITestsLaunchTests.swift
 //  Pano ViewUITests
 //
 //  Created by Daniel Husiuk on 21.05.2026.
@@ -7,7 +7,7 @@
 
 import XCTest
 
-final class Pano_ViewUITestsLaunchTests: XCTestCase {
+class PanoViewUITestsLaunchTests: XCTestCase {
 
     override class var runsForEachTargetApplicationUIConfiguration: Bool {
         true
@@ -21,9 +21,6 @@ final class Pano_ViewUITestsLaunchTests: XCTestCase {
     func testLaunch() throws {
         let app = XCUIApplication()
         app.launch()
-
-        // Insert steps here to perform after app launch but before taking a screenshot,
-        // such as logging into a test account or navigating somewhere in the app
 
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Launch Screen"

@@ -9,7 +9,6 @@ import Foundation
 import Combine
 import Photos
 
-// 1. Впровадження тристанової моделі авторизації
 enum AuthState {
     case notDetermined
     case authorized
@@ -23,14 +22,15 @@ struct PanoramaSection: Identifiable {
 }
 
 @MainActor
-class PanoramaFetcher: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
+final class PanoramaFetcher: NSObject, ObservableObject, PHPhotoLibraryChangeObserver {
+    
     @Published var panoramas: [PHAsset] = []
     @Published var groupedPanoramas: [PanoramaSection] = []
     @Published var authState: AuthState = .notDetermined
     
     private var fetchResult: PHFetchResult<PHAsset>?
     var isAuthorized: Bool {
-        return authState == .authorized
+        authState == .authorized
     }
     
     override init() {
@@ -56,9 +56,9 @@ class PanoramaFetcher: NSObject, ObservableObject, PHPhotoLibraryChangeObserver 
             return
         }
         
-        PHPhotoLibrary.requestAuthorization(for: .readWrite) { [weak self] newStatus in
-            DispatchQueue.main.async {
-                self?.handleAuthorization(newStatus)
+        PHPhotoLibrary.requestAuthorization(for: .readWrite) { [weak self] status in
+            Task { @MainActor in
+                self?.handleAuthorization(status)
             }
         }
     }
@@ -83,60 +83,65 @@ class PanoramaFetcher: NSObject, ObservableObject, PHPhotoLibraryChangeObserver 
     }
     
     private func fetchPanoramas() {
-        let fetchOptions = PHFetchOptions()
-        fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        fetchOptions.predicate = NSPredicate(format: "(mediaSubtype & %d) != 0", PHAssetMediaSubtype.photoPanorama.rawValue)
+        let options = PHFetchOptions()
+        options.sortDescriptors = [
+            NSSortDescriptor(key: "creationDate", ascending: false)
+        ]
+        options.predicate = NSPredicate(
+            format: "(mediaSubtype & %d) != 0",
+            PHAssetMediaSubtype.photoPanorama.rawValue
+        )
         
-        let result = PHAsset.fetchAssets(with: .image, options: fetchOptions)
-        self.fetchResult = result
+        let result = PHAsset.fetchAssets(with: .image, options: options)
+        fetchResult = result
         
-        var fetchedAssets: [PHAsset] = []
-        result.enumerateObjects { (asset, _, _) in
-            fetchedAssets.append(asset)
+        var assets: [PHAsset] = []
+        result.enumerateObjects { asset, _, _ in
+            assets.append(asset)
         }
-        
-        self.panoramas = fetchedAssets
-        self.fetchPanoramasSection()
+        panoramas = assets
+        fetchPanoramasSection()
     }
     
     private func fetchPanoramasSection() {
         let calendar = Calendar.current
         
-        let groupedDict = Dictionary(grouping: panoramas) { asset -> Int in
+        let grouped = Dictionary(grouping: panoramas) { asset -> Int in
             guard let date = asset.creationDate else { return 0 }
             return calendar.component(.year, from: date)
         }
         
-        let sections = groupedDict.map { (year, assets) -> PanoramaSection in
-            let sortedAssets = assets.sorted { a, b in
-                guard let dateA = a.creationDate, let dateB = b.creationDate else { return false }
-                return dateA > dateB
-            }
-            return PanoramaSection(year: year, assets: sortedAssets)
-        }.sorted { $0.year > $1.year }
-        
-        DispatchQueue.main.async {
-            self.groupedPanoramas = sections
+        let sections = grouped.map { year, assets in
+            PanoramaSection(
+                year: year,
+                assets: assets
+            )
         }
+            .sorted {
+                $0.year > $1.year
+            }
+        groupedPanoramas = sections
     }
     
     nonisolated func photoLibraryDidChange(_ changeInstance: PHChange) {
-        
         Task { @MainActor [weak self] in
-            guard let self = self else { return }
-            
-            guard let currentFetchResult = self.fetchResult,
-                  let changes = changeInstance.changeDetails(for: currentFetchResult) else { return }
+            guard let self,
+                  let currentResult = self.fetchResult,
+                  let changes = changeInstance.changeDetails(for: currentResult)
+                    else {
+                return
+            }
             
             self.fetchResult = changes.fetchResultAfterChanges
             
             if changes.hasIncrementalChanges || changes.hasMoves {
-                var updatedAssets: [PHAsset] = []
-                self.fetchResult?.enumerateObjects { (asset, _, _) in
-                    updatedAssets.append(asset)
+                var assets: [PHAsset] = []
+                
+                self.fetchResult?.enumerateObjects { asset, _, _ in
+                    assets.append(asset)
                 }
                 
-                self.panoramas = updatedAssets
+                self.panoramas = assets
                 self.fetchPanoramasSection()
             }
         }
